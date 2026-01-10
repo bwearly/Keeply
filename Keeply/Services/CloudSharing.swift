@@ -65,6 +65,7 @@ enum CloudSharing {
         }
 
         if let existing = try? fetchShare(for: objectID, persistentContainer: persistentContainer) {
+            print("ℹ️ Reusing existing CloudKit share:", existing.recordID.recordName)
             return existing
         }
 
@@ -89,6 +90,7 @@ enum CloudSharing {
 
                         share[CKShare.SystemFieldKey.title] =
                             (householdInContext.name ?? "Household") as CKRecordValue
+                        print("✅ Created new CloudKit share:", share.recordID.recordName)
                         continuation.resume(returning: share)
                     }
                 } catch {

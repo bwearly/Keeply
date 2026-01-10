@@ -26,6 +26,8 @@ struct PersistenceController {
             containerIdentifier: "iCloud.com.blakeearly.keeply"
         )
         
+        desc.setOption(true as NSNumber, forKey: NSMigratePersistentStoresAutomaticallyOption)
+        desc.setOption(true as NSNumber, forKey: NSInferMappingModelAutomaticallyOption)
         desc.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
         desc.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
 

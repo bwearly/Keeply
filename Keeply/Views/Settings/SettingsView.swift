@@ -170,11 +170,18 @@ struct SettingsView: View {
             if let hh = household { ensureDefaultMemberExists(in: hh) }
             reloadShareStatus()
         }
+        // CloudKit share flow: present the controller, which prepares or reuses the share.
         .sheet(isPresented: $showShareSheet) {
-            if let share {
+            if let household {
                 CloudKitShareSheet(
-                    share: share,
-                    container: CloudSharing.cloudKitContainer(from: persistentContainer),
+                    householdID: household.objectID,
+                    viewContext: context,
+                    persistentContainer: persistentContainer,
+                    shareTitle: shareTitle(for: household),
+                    onSharePrepared: { preparedShare in
+                        share = preparedShare
+                        isSharing = false
+                    },
                     onDone: {
                         showShareSheet = false
                         reloadShareStatus()
@@ -182,6 +189,7 @@ struct SettingsView: View {
                     onError: { error in
                         shareErrorText = error.localizedDescription
                         lastCloudKitError = error.localizedDescription
+                        isSharing = false
                         showShareSheet = false
                     }
                 )
@@ -195,27 +203,8 @@ struct SettingsView: View {
         guard let household else { return }
         shareErrorText = nil
         isSharing = true
-
-        Task {
-            do {
-                let share = try await CloudSharing.fetchOrCreateShare(
-                    for: household,
-                    in: context,
-                    persistentContainer: persistentContainer
-                )
-                await MainActor.run {
-                    self.share = share
-                    showShareSheet = true
-                    isSharing = false
-                }
-            } catch {
-                await MainActor.run {
-                    shareErrorText = error.localizedDescription
-                    lastCloudKitError = error.localizedDescription
-                    isSharing = false
-                }
-            }
-        }
+        print("ℹ️ Preparing CloudKit share for household:", household.objectID)
+        showShareSheet = true
     }
 
     private func reloadShareStatus() {

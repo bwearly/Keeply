@@ -4,11 +4,15 @@
 //
 
 import SwiftUI
+import CoreData
 import CloudKit
 
 struct CloudKitShareSheet: UIViewControllerRepresentable {
-    let share: CKShare
-    let container: CKContainer
+    let householdID: NSManagedObjectID
+    let viewContext: NSManagedObjectContext
+    let persistentContainer: NSPersistentCloudKitContainer
+    let shareTitle: String
+    let onSharePrepared: (CKShare) -> Void
     let onDone: () -> Void
     let onError: (Error) -> Void
 
@@ -17,7 +21,32 @@ struct CloudKitShareSheet: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> UICloudSharingController {
-        let controller = UICloudSharingController(share: share, container: container)
+        // Use a preparation handler so the controller owns the full share lifecycle.
+        let controller = UICloudSharingController { _, completion in
+            Task { @MainActor in
+                do {
+                    let household = try viewContext.existingObject(with: householdID) as! Household
+                    let share = try await CloudSharing.fetchOrCreateShare(
+                        for: household,
+                        in: viewContext,
+                        persistentContainer: persistentContainer
+                    )
+
+                    let currentTitle = share[CKShare.SystemFieldKey.title] as? String
+                    if currentTitle == nil || currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+                        share[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
+                    }
+
+                    print("✅ CloudKit share ready:", share.recordID.recordName)
+                    onSharePrepared(share)
+                    completion(share, CloudSharing.cloudKitContainer(from: persistentContainer), nil)
+                } catch {
+                    print("❌ CloudKit share preparation failed:", error)
+                    onError(error)
+                    completion(nil, nil, error)
+                }
+            }
+        }
         controller.availablePermissions = [.allowReadOnly, .allowReadWrite]
         controller.delegate = context.coordinator
         controller.presentationController?.delegate = context.coordinator
@@ -43,19 +72,23 @@ struct CloudKitShareSheet: UIViewControllerRepresentable {
         }
 
         func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+            print("ℹ️ CloudKit share sheet dismissed.")
             finish()
         }
 
         func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: Error) {
+            print("❌ CloudKit share failed to save:", error)
             onError(error)
             finish()
         }
 
         func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {
+            print("✅ CloudKit share saved.")
             finish()
         }
 
         func cloudSharingControllerDidStopSharing(_ csc: UICloudSharingController) {
+            print("🛑 CloudKit sharing stopped.")
             finish()
         }
 

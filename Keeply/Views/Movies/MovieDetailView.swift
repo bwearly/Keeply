@@ -348,6 +348,7 @@ struct MovieDetailView: View {
         req.predicate = NSPredicate(format: "movie == %@", movie)
         req.sortDescriptors = [NSSortDescriptor(key: "watchedOn", ascending: false)]
         viewings = (try? context.fetch(req)) ?? []
+        print("ℹ️ Reloaded viewings for movie:", movie.objectID, "count:", viewings.count)
     }
 
     private func reloadFeedbacks() {
@@ -435,6 +436,7 @@ struct MovieDetailView: View {
 
         do {
             try context.save()
+            print("✅ Saved feedback for movie:", movie.objectID, "member:", selectedMember.objectID)
         } catch {
             context.rollback()
             print("Save feedback failed:", error)
@@ -461,6 +463,7 @@ struct MovieDetailView: View {
             do {
                 try context.save()
                 reloadViewings()
+                print("✅ Added viewing for movie:", movie.objectID, "rewatch:", isRewatch)
             } catch {
                 context.rollback()
                 print("❌ Failed to save viewing:", error)
@@ -487,6 +490,7 @@ struct MovieDetailView: View {
         do {
             try context.save()
             reloadViewings()
+            print("✅ Deleted viewings for movie:", movie.objectID, "count:", offsets.count)
         } catch {
             context.rollback()
             print("Failed to delete viewings:", error)
