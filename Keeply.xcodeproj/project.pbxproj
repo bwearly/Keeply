@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		ADFCEAE22F0C3E00006D3F51 /* Keeply.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = Keeply.app; path = "/Users/blakeearly/Desktop/Keeply/Keeply/build/Debug-iphoneos/Keeply.app"; sourceTree = "<absolute>"; };
+		ADFCEAE22F0C3E00006D3F51 /* Keeply.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Keeply.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -139,7 +139,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = CBGQQ86XZY;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Keeply/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -173,7 +173,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = CBGQQ86XZY;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Keeply/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
