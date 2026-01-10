@@ -83,11 +83,11 @@ enum CloudKitSharePresenter {
                 }
             }
 
+            controller.modalPresentationStyle = .formSheet
             controller.availablePermissions = [.allowReadOnly, .allowReadWrite]
 
             coordinator.attach(controller)
             controller.delegate = coordinator
-            controller.presentationController?.delegate = coordinator
 
             // Retain coordinator for lifetime of controller
             objc_setAssociatedObject(
@@ -97,7 +97,9 @@ enum CloudKitSharePresenter {
                 .OBJC_ASSOCIATION_RETAIN_NONATOMIC
             )
 
-            present(controller: controller, from: presenter, attempt: 0)
+            DispatchQueue.main.async {
+                present(controller: controller, from: presenter, attempt: 0)
+            }
             print("ℹ️ CloudKit share UI presented (preparation handler).")
         }
     }
@@ -109,7 +111,9 @@ enum CloudKitSharePresenter {
         attempt: Int
     ) {
         if attempt >= 10 {
-            presenter.present(controller, animated: true)
+            DispatchQueue.main.async {
+                presenter.present(controller, animated: true)
+            }
             return
         }
 
@@ -122,7 +126,18 @@ enum CloudKitSharePresenter {
             return
         }
 
-        presenter.present(controller, animated: true)
+        if let presented = presenter.presentedViewController {
+            presented.dismiss(animated: true) {
+                DispatchQueue.main.async {
+                    present(controller: controller, from: presenter, attempt: attempt + 1)
+                }
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            presenter.present(controller, animated: true)
+        }
     }
 
     private enum AssociatedKeys {
@@ -136,7 +151,7 @@ enum CloudKitSharePresenter {
         }
     }
 
-    private final class Coordinator: NSObject, UICloudSharingControllerDelegate, UIAdaptivePresentationControllerDelegate {
+    private final class Coordinator: NSObject, UICloudSharingControllerDelegate {
         private let onDone: () -> Void
         private let onError: (Error) -> Void
         private var didFinish = false
@@ -167,11 +182,6 @@ enum CloudKitSharePresenter {
             controller.dismiss(animated: true) {
                 self.onDone()
             }
-        }
-
-        func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-            print("ℹ️ CloudKit share sheet dismissed.")
-            finish()
         }
 
         func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: Error) {
