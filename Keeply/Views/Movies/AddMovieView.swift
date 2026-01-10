@@ -20,6 +20,7 @@ struct AddMovieView: View {
     @State private var yearText: String = ""
     @State private var mpaaRating: String = "—"
     @State private var notes: String = ""
+    @State private var watchedOn: Date = Date()
 
     // Genres
     @State private var selectedGenres: Set<String> = []
@@ -41,6 +42,13 @@ struct AddMovieView: View {
 
                 TextField("Year", text: $yearText)
                     .keyboardType(.numberPad)
+
+                DatePicker(
+                    "Watch date",
+                    selection: $watchedOn,
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
 
                 Picker("MPAA Rating", selection: $mpaaRating) {
                     ForEach(mpaaOptions, id: \.self) { r in
@@ -273,6 +281,7 @@ struct AddMovieView: View {
         let v = Viewing(context: context)
         // awakeFromInsert already sets id + watchedOn
         v.isRewatch = false
+        v.watchedOn = watchedOn
         v.notes = nil
         v.movie = movie
         v.household = household
