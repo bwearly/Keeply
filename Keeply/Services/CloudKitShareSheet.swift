@@ -12,7 +12,7 @@ enum CloudKitSharePresenter {
 
     static func present(
         householdID: NSManagedObjectID,
-        presenter: UIViewController,
+        window: UIWindow,
         viewContext: NSManagedObjectContext,
         persistentContainer: NSPersistentCloudKitContainer,
         shareTitle: String,
@@ -22,8 +22,8 @@ enum CloudKitSharePresenter {
         onError: @escaping (Error) -> Void
     ) {
         Task { @MainActor in
-            guard presenter.view.window != nil else {
-                onError(PresentationError.presenterNotReady)
+            guard let rootViewController = window.rootViewController else {
+                onError(PresentationError.windowNotReady)
                 return
             }
 
@@ -83,7 +83,6 @@ enum CloudKitSharePresenter {
                 }
             }
 
-            controller.modalPresentationStyle = .formSheet
             controller.availablePermissions = [.allowReadOnly, .allowReadWrite]
 
             coordinator.attach(controller)
@@ -98,7 +97,7 @@ enum CloudKitSharePresenter {
             )
 
             DispatchQueue.main.async {
-                present(controller: controller, from: presenter, attempt: 0)
+                present(controller: controller, in: window, attempt: 0)
             }
             print("ℹ️ CloudKit share UI presented (preparation handler).")
         }
@@ -107,35 +106,30 @@ enum CloudKitSharePresenter {
     @MainActor
     private static func present(
         controller: UICloudSharingController,
-        from presenter: UIViewController,
+        in window: UIWindow,
         attempt: Int
     ) {
         if attempt >= 10 {
             DispatchQueue.main.async {
+                guard let rootViewController = window.rootViewController else { return }
+                let presenter = topmostViewController(from: rootViewController)
                 presenter.present(controller, animated: true)
             }
             return
         }
 
-        guard presenter.view.window != nil else {
+        guard window.rootViewController != nil else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 Task { @MainActor in
-                    present(controller: controller, from: presenter, attempt: attempt + 1)
-                }
-            }
-            return
-        }
-
-        if let presented = presenter.presentedViewController {
-            presented.dismiss(animated: true) {
-                DispatchQueue.main.async {
-                    present(controller: controller, from: presenter, attempt: attempt + 1)
+                    present(controller: controller, in: window, attempt: attempt + 1)
                 }
             }
             return
         }
 
         DispatchQueue.main.async {
+            guard let rootViewController = window.rootViewController else { return }
+            let presenter = topmostViewController(from: rootViewController)
             presenter.present(controller, animated: true)
         }
     }
@@ -145,9 +139,29 @@ enum CloudKitSharePresenter {
     }
 
     private enum PresentationError: LocalizedError {
-        case presenterNotReady
+        case windowNotReady
         var errorDescription: String? {
             "Unable to find an active window to present the share sheet."
+        }
+    }
+
+    @MainActor
+    private static func topmostViewController(from root: UIViewController) -> UIViewController {
+        var current = root
+        while true {
+            if let presented = current.presentedViewController {
+                current = presented
+                continue
+            }
+            if let navigation = current as? UINavigationController, let visible = navigation.visibleViewController {
+                current = visible
+                continue
+            }
+            if let tab = current as? UITabBarController, let selected = tab.selectedViewController {
+                current = selected
+                continue
+            }
+            return current
         }
     }
 

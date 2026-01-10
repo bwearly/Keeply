@@ -7,7 +7,7 @@ import SwiftUI
 import UIKit
 
 final class PresenterHolder {
-    weak var presenter: UIViewController?
+    weak var window: UIWindow?
 }
 
 struct PresenterAnchor: UIViewControllerRepresentable {
@@ -18,7 +18,7 @@ struct PresenterAnchor: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        holder.presenter = uiViewController
+        holder.window = uiViewController.view.window
     }
 
     private final class AnchorViewController: UIViewController {
@@ -36,12 +36,12 @@ struct PresenterAnchor: UIViewControllerRepresentable {
 
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            holder.presenter = self
+            holder.window = view.window
         }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
-            holder.presenter = self
+            holder.window = view.window
         }
     }
 }
