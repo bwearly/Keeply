@@ -19,14 +19,13 @@ struct SettingsView: View {
     @State private var householdName = ""
     @State private var myName = ""
 
-    @State private var showShareSheet = false
     @State private var isSharing = false
     @State private var share: CKShare?
     @State private var accountStatus: CKAccountStatus = .couldNotDetermine
     @State private var lastCloudKitError: String?
     @State private var shareTimeoutTask: Task<Void, Never>?
     @State private var shareAttemptID = UUID()
-    
+
     @State private var shareTask: Task<Void, Never>?
 
     private let persistentContainer = PersistenceController.shared.container
@@ -52,38 +51,6 @@ struct SettingsView: View {
         .onChange(of: household?.objectID) { _, _ in
             if let hh = household { ensureDefaultMemberExists(in: hh) }
             reloadShareStatus()
-        }
-        // CloudKit share flow: present the controller, which prepares or reuses the share.
-        .sheet(isPresented: $showShareSheet) {
-            if let share {
-                CloudKitShareSheet(
-                    share: share,
-                    persistentContainer: persistentContainer,
-                    onDone: {
-                        showShareSheet = false
-                        isSharing = false
-                        reloadShareStatus()
-                        shareTask?.cancel()
-                        shareTask = nil
-                    },
-                    onError: { error in
-                        shareErrorText = error.localizedDescription
-                        lastCloudKitError = error.localizedDescription
-                        showShareSheet = false
-                        isSharing = false
-                        shareTask?.cancel()
-                        shareTask = nil
-                    }
-                )
-            } else {
-                // Safety fallback (should only flash briefly)
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Preparing invite…")
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-            }
         }
     }
 
@@ -268,21 +235,33 @@ struct SettingsView: View {
         lastCloudKitError = nil
 
         isSharing = true
-        showShareSheet = true
 
         shareAttemptID = UUID()
         let attemptID = shareAttemptID
 
         print("ℹ️ Preparing CloudKit share for household:", household.objectID)
 
-        // Optional preload: if a share already exists, pass it into the share sheet.
-        // If nil, CloudKitShareSheet should create it.
-        share = (try? CloudSharing.fetchShare(
-            for: household.objectID,
-            persistentContainer: persistentContainer
-        ))
+        shareTask?.cancel()
+        shareTask = Task {
+            do {
+                let createdShare = try await CloudSharing.fetchOrCreateShare(
+                    for: household,
+                    in: context,
+                    persistentContainer: persistentContainer
+                )
 
-        // Timeout watchdog (only if still "preparing")
+                await MainActor.run {
+                    guard isSharing, shareAttemptID == attemptID else { return }
+                    share = createdShare
+                    presentShareController(with: createdShare)
+                }
+            } catch {
+                await MainActor.run {
+                    handleShareError(error)
+                }
+            }
+        }
+
         shareTimeoutTask?.cancel()
         shareTimeoutTask = Task {
             try? await Task.sleep(nanoseconds: 8_000_000_000)
@@ -292,9 +271,38 @@ struct SettingsView: View {
                 shareErrorText = "Invite is taking too long. Check iCloud and try again."
                 lastCloudKitError = shareErrorText
                 isSharing = false
-                showShareSheet = false
             }
         }
+    }
+
+    @MainActor
+    private func presentShareController(with share: CKShare) {
+        CloudKitSharePresenter.present(
+            share: share,
+            persistentContainer: persistentContainer,
+            onDone: {
+                shareTimeoutTask?.cancel()
+                shareTimeoutTask = nil
+                isSharing = false
+                shareTask?.cancel()
+                shareTask = nil
+                reloadShareStatus()
+            },
+            onError: { error in
+                handleShareError(error)
+            }
+        )
+    }
+
+    @MainActor
+    private func handleShareError(_ error: Error) {
+        shareTimeoutTask?.cancel()
+        shareTimeoutTask = nil
+        shareErrorText = error.localizedDescription
+        lastCloudKitError = error.localizedDescription
+        isSharing = false
+        shareTask?.cancel()
+        shareTask = nil
     }
 
     private func reloadShareStatus() {
