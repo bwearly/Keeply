@@ -19,6 +19,7 @@ struct MovieDetailView: View {
     // Loaded data (keeps SwiftUI body simple)
     @State private var members: [HouseholdMember] = []
     @State private var viewings: [Viewing] = []
+    @State private var feedbackByMemberID: [NSManagedObjectID: MovieFeedback] = [:]
 
     // Selected member for feedback
     @State private var selectedMember: HouseholdMember?
@@ -238,6 +239,17 @@ struct MovieDetailView: View {
                 Text("No watches recorded yet.")
                     .foregroundStyle(.secondary)
             } else {
+                let watchedCount = viewings.filter { !$0.isRewatch }.count
+                let rewatchCount = viewings.filter { $0.isRewatch }.count
+
+                HStack {
+                    Text("Watched \(watchedCount)")
+                    Text("•")
+                    Text("Rewatches \(rewatchCount)")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
                 ForEach(viewings) { v in
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -321,6 +333,7 @@ struct MovieDetailView: View {
     private func reloadAll() {
         reloadMembers()
         reloadViewings()
+        reloadFeedbacks()
     }
 
     private func reloadMembers() {
@@ -335,6 +348,17 @@ struct MovieDetailView: View {
         req.predicate = NSPredicate(format: "movie == %@", movie)
         req.sortDescriptors = [NSSortDescriptor(key: "watchedOn", ascending: false)]
         viewings = (try? context.fetch(req)) ?? []
+    }
+
+    private func reloadFeedbacks() {
+        let req = NSFetchRequest<MovieFeedback>(entityName: "MovieFeedback")
+        req.predicate = NSPredicate(format: "movie == %@", movie)
+        let all = (try? context.fetch(req)) ?? []
+
+        feedbackByMemberID = Dictionary(uniqueKeysWithValues: all.compactMap { fb in
+            guard let memberID = fb.member?.objectID else { return nil }
+            return (memberID, fb)
+        })
     }
 
     // MARK: - Movie details
@@ -507,10 +531,7 @@ struct MovieDetailView: View {
     }
 
     private func fetchFeedback(movie: Movie, member: HouseholdMember) -> MovieFeedback? {
-        let req = NSFetchRequest<MovieFeedback>(entityName: "MovieFeedback")
-        req.fetchLimit = 1
-        req.predicate = NSPredicate(format: "movie == %@ AND member == %@", movie, member)
-        return try? context.fetch(req).first
+        feedbackByMemberID[member.objectID]
     }
 
     // MARK: - UI helpers

@@ -5,6 +5,7 @@
 
 import SwiftUI
 import CoreData
+import CloudKit
 
 struct SettingsView: View {
     @Environment(\.managedObjectContext) private var context
@@ -13,11 +14,18 @@ struct SettingsView: View {
     @Binding var member: HouseholdMember?
 
     @State private var errorText: String?
+    @State private var shareErrorText: String?
 
     @State private var householdName = ""
     @State private var myName = ""
 
-    @State private var showInvite = false
+    @State private var showShareSheet = false
+    @State private var isSharing = false
+    @State private var share: CKShare?
+    @State private var accountStatus: CKAccountStatus = .couldNotDetermine
+    @State private var lastCloudKitError: String?
+
+    private let persistentContainer = PersistenceController.shared.container
 
     var body: some View {
         Form {
@@ -32,9 +40,18 @@ struct SettingsView: View {
                             .font(.subheadline)
                     }
 
-                    Button("Invite People") {
-                        showInvite = true
+                    Button {
+                        inviteMember()
+                    } label: {
+                        HStack {
+                            Text("Invite Member")
+                            Spacer()
+                            if isSharing {
+                                ProgressView()
+                            }
+                        }
                     }
+                    .disabled(isSharing)
                 } else {
                     Text("You’re not in a household yet.")
                         .foregroundStyle(.secondary)
@@ -47,6 +64,32 @@ struct SettingsView: View {
 
                     Button("Create Household") { createHousehold() }
                         .disabled(householdName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+
+            if let household {
+                Section("Share Status") {
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(share == nil ? "Not shared" : "Shared")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Title")
+                        Spacer()
+                        Text(shareTitle(for: household))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    HStack {
+                        Text("Invite link")
+                        Spacer()
+                        Text(share?.url == nil ? "Not ready" : "Ready")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -79,31 +122,135 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if let shareErrorText {
+                Section("Sharing Error") {
+                    Text(shareErrorText).foregroundStyle(.red)
+                }
+            }
+
             if let errorText {
                 Section("Error") {
                     Text(errorText).foregroundStyle(.red)
                 }
             }
+
+            #if DEBUG
+            Section("Debug") {
+                HStack {
+                    Text("iCloud status")
+                    Spacer()
+                    Text(accountStatusText(accountStatus))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Container")
+                    Spacer()
+                    Text(CloudSharing.containerIdentifier(from: persistentContainer))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Last CloudKit error")
+                    Spacer()
+                    Text(lastCloudKitError ?? "None")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            #endif
         }
         .navigationTitle("Settings")
         .onAppear {
             if let hh = household { ensureDefaultMemberExists(in: hh) }
+            reloadShareStatus()
+            loadAccountStatus()
         }
         .onChange(of: household?.objectID) { _, _ in
             if let hh = household { ensureDefaultMemberExists(in: hh) }
+            reloadShareStatus()
         }
-        .sheet(isPresented: $showInvite) {
-            if let hh = household {
-                HouseholdInviteLinkView(
-                    household: hh,
-                    onDone: { showInvite = false },
-                    onError: { msg in
-                        errorText = msg
-                        showInvite = false
+        .sheet(isPresented: $showShareSheet) {
+            if let share {
+                CloudKitShareSheet(
+                    share: share,
+                    container: CloudSharing.cloudKitContainer(from: persistentContainer),
+                    onDone: {
+                        showShareSheet = false
+                        reloadShareStatus()
+                    },
+                    onError: { error in
+                        shareErrorText = error.localizedDescription
+                        lastCloudKitError = error.localizedDescription
+                        showShareSheet = false
                     }
                 )
-                .ignoresSafeArea()
             }
+        }
+    }
+
+    // MARK: - Share handling
+
+    private func inviteMember() {
+        guard let household else { return }
+        shareErrorText = nil
+        isSharing = true
+
+        Task {
+            do {
+                let share = try await CloudSharing.fetchOrCreateShare(
+                    for: household,
+                    in: context,
+                    persistentContainer: persistentContainer
+                )
+                await MainActor.run {
+                    self.share = share
+                    showShareSheet = true
+                    isSharing = false
+                }
+            } catch {
+                await MainActor.run {
+                    shareErrorText = error.localizedDescription
+                    lastCloudKitError = error.localizedDescription
+                    isSharing = false
+                }
+            }
+        }
+    }
+
+    private func reloadShareStatus() {
+        guard let household else {
+            share = nil
+            return
+        }
+
+        share = (try? CloudSharing.fetchShare(
+            for: household.objectID,
+            persistentContainer: persistentContainer
+        ))
+    }
+
+    private func loadAccountStatus() {
+        Task {
+            let status = await CloudSharing.accountStatus(using: persistentContainer)
+            await MainActor.run { accountStatus = status }
+        }
+    }
+
+    private func shareTitle(for household: Household) -> String {
+        if let shareTitle = share?[CKShare.SystemFieldKey.title] as? String, !shareTitle.isEmpty {
+            return shareTitle
+        }
+        return household.name ?? "Household"
+    }
+
+    private func accountStatusText(_ status: CKAccountStatus) -> String {
+        switch status {
+        case .available: return "Available"
+        case .noAccount: return "No account"
+        case .restricted: return "Restricted"
+        case .couldNotDetermine: return "Could not determine"
+        @unknown default: return "Unknown"
         }
     }
 
