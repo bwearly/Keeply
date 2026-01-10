@@ -32,175 +32,211 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Household") {
-                if let household {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(household.name ?? "Household")
-                            .font(.headline)
-
-                        Text("Sharing uses iCloud")
-                            .foregroundStyle(.secondary)
-                            .font(.subheadline)
-                    }
-
-                    Button {
-                        inviteMember()
-                    } label: {
-                        HStack {
-                            Text(isSharing ? "Preparing invite..." : "Invite Member")
-                            Spacer()
-                            if isSharing {
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(isSharing)
-                } else {
-                    Text("You’re not in a household yet.")
-                        .foregroundStyle(.secondary)
-
-                    TextField("Household name", text: $householdName)
-                        .textInputAutocapitalization(.words)
-
-                    TextField("Your name", text: $myName)
-                        .textInputAutocapitalization(.words)
-
-                    Button("Create Household") { createHousehold() }
-                        .disabled(householdName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-
-            if let household {
-                Section("Share Status") {
-                    HStack {
-                        Text("Status")
-                        Spacer()
-                        Text(share == nil ? "Not shared" : "Shared")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("Title")
-                        Spacer()
-                        Text(shareTitle(for: household))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    HStack {
-                        Text("Invite link")
-                        Spacer()
-                        Text(share?.url == nil ? "Not ready" : "Ready")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Section("Members") {
-                if let household {
-                    let members = fetchMembers(for: household)
-
-                    if members.isEmpty {
-                        Text("No members found (auto-fixing…)").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(members) { m in
-                            HStack {
-                                Text(m.displayName ?? "Member")
-                                Spacer()
-                                if m.objectID == member?.objectID {
-                                    Text("You").foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Text("Create a household to see members.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("How sharing works") {
-                Text("Invites use iCloud sharing. Everyone in the household sees the same movies, feedback, and watch history.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let shareErrorText {
-                Section("Sharing Error") {
-                    Text(shareErrorText).foregroundStyle(.red)
-                    Button("Retry Invite") { inviteMember() }
-                        .disabled(isSharing || household == nil)
-                }
-            }
-
-            if let errorText {
-                Section("Error") {
-                    Text(errorText).foregroundStyle(.red)
-                }
-            }
-
+            householdSection
+            shareStatusSection
+            membersSection
+            howSharingWorksSection
+            sharingErrorSection
+            errorSection
             #if DEBUG
-            Section("Debug") {
-                HStack {
-                    Text("iCloud status")
-                    Spacer()
-                    Text(accountStatusText(accountStatus))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Text("Container")
-                    Spacer()
-                    Text(CloudSharing.containerIdentifier(from: persistentContainer))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Text("Last CloudKit error")
-                    Spacer()
-                    Text(lastCloudKitError ?? "None")
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
+            debugSection
             #endif
         }
         .navigationTitle("Settings")
-        .onAppear {
-            if let hh = household { ensureDefaultMemberExists(in: hh) }
-            reloadShareStatus()
-            loadAccountStatus()
-        }
-        .onChange(of: household?.objectID) { _, _ in
-            if let hh = household { ensureDefaultMemberExists(in: hh) }
-            reloadShareStatus()
-        }
-        // CloudKit share flow: present the controller, which prepares or reuses the share.
-        .sheet(isPresented: $showShareSheet) {
-            if let household, let share {
-                CloudKitShareSheet(
-                    householdID: household.objectID,
-                    viewContext: context,
-                    persistentContainer: persistentContainer,
-                    shareTitle: shareTitle(for: household),
-                    preparedShare: share,
-                    onSharePrepared: { preparedShare in
-                        share = preparedShare
-                    },
-                    onDone: {
-                        showShareSheet = false
-                        isSharing = false
-                        reloadShareStatus()
-                    },
-                    onError: { error in
-                        shareErrorText = error.localizedDescription
-                        lastCloudKitError = error.localizedDescription
-                        isSharing = false
-                        showShareSheet = false
+        .onAppear { onAppearActions() }
+        .onChange(of: household?.objectID) { _, _ in onHouseholdChange() }
+        .sheet(isPresented: $showShareSheet) { shareSheet }
+    }
+
+    // MARK: - Extracted Sections
+
+    @ViewBuilder
+    private var householdSection: some View {
+        Section("Household") {
+            if let household {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(household.name ?? "Household")
+                        .font(.headline)
+
+                    Text("Sharing uses iCloud")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                }
+
+                Button {
+                    inviteMember()
+                } label: {
+                    HStack {
+                        Text(isSharing ? "Preparing invite..." : "Invite Member")
+                        Spacer()
+                        if isSharing { ProgressView() }
                     }
-                )
+                }
+                .disabled(isSharing)
+            } else {
+                Text("You’re not in a household yet.")
+                    .foregroundStyle(.secondary)
+
+                TextField("Household name", text: $householdName)
+                    .textInputAutocapitalization(.words)
+
+                TextField("Your name", text: $myName)
+                    .textInputAutocapitalization(.words)
+
+                Button("Create Household") { createHousehold() }
+                    .disabled(householdName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+    }
+
+    @ViewBuilder
+    private var shareStatusSection: some View {
+        if let household {
+            Section("Share Status") {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text(share == nil ? "Not shared" : "Shared")
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Title")
+                    Spacer()
+                    Text(shareTitle(for: household))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                HStack {
+                    Text("Invite link")
+                    Spacer()
+                    Text(share?.url == nil ? "Not ready" : "Ready")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var membersSection: some View {
+        Section("Members") {
+            if let household {
+                let members = fetchMembers(for: household)
+                if members.isEmpty {
+                    Text("No members found (auto-fixing…)").foregroundStyle(.secondary)
+                } else {
+                    ForEach(members) { m in
+                        HStack {
+                            Text(m.displayName ?? "Member")
+                            Spacer()
+                            if m.objectID == member?.objectID {
+                                Text("You").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("Create a household to see members.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var howSharingWorksSection: some View {
+        Section("How sharing works") {
+            Text("Invites use iCloud sharing. Everyone in the household sees the same movies, feedback, and watch history.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var sharingErrorSection: some View {
+        if let shareErrorText {
+            Section("Sharing Error") {
+                Text(shareErrorText).foregroundStyle(.red)
+                Button("Retry Invite") { inviteMember() }
+                    .disabled(isSharing || household == nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var errorSection: some View {
+        if let errorText {
+            Section("Error") {
+                Text(errorText).foregroundStyle(.red)
+            }
+        }
+    }
+
+    #if DEBUG
+    private var debugSection: some View {
+        Section("Debug") {
+            HStack {
+                Text("iCloud status")
+                Spacer()
+                Text(accountStatusText(accountStatus))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Container")
+                Spacer()
+                Text(CloudSharing.containerIdentifier(from: persistentContainer))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Last CloudKit error")
+                Spacer()
+                Text(lastCloudKitError ?? "None")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+    #endif
+
+    // MARK: - Sheet Content & Lifecycle Hooks
+
+    @ViewBuilder
+    private var shareSheet: some View {
+        if let household, let share {
+            CloudKitShareSheet(
+                householdID: household.objectID,
+                viewContext: context,
+                persistentContainer: persistentContainer,
+                shareTitle: shareTitle(for: household),
+                preparedShare: share,
+                onSharePrepared: { preparedShare in
+                    self.share = preparedShare
+                },
+                onDone: {
+                    showShareSheet = false
+                    isSharing = false
+                    reloadShareStatus()
+                },
+                onError: { error in
+                    shareErrorText = error.localizedDescription
+                    lastCloudKitError = error.localizedDescription
+                    isSharing = false
+                    showShareSheet = false
+                }
+            )
+        }
+    }
+
+    private func onAppearActions() {
+        if let hh = household { ensureDefaultMemberExists(in: hh) }
+        reloadShareStatus()
+        loadAccountStatus()
+    }
+
+    private func onHouseholdChange() {
+        if let hh = household { ensureDefaultMemberExists(in: hh) }
+        reloadShareStatus()
     }
 
     // MARK: - Share handling
@@ -376,3 +412,4 @@ struct SettingsView: View {
         }
     }
 }
+
