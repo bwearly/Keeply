@@ -26,6 +26,8 @@ struct SettingsView: View {
     @State private var lastCloudKitError: String?
     @State private var shareTimeoutTask: Task<Void, Never>?
     @State private var shareAttemptID = UUID()
+    
+    @State private var shareTask: Task<Void, Never>?
 
     private let persistentContainer = PersistenceController.shared.container
 
@@ -53,67 +55,246 @@ struct SettingsView: View {
         }
         // CloudKit share flow: present the controller, which prepares or reuses the share.
         .sheet(isPresented: $showShareSheet) {
-            if let household {
+            if let share {
                 CloudKitShareSheet(
-                    householdID: household.objectID,
-                    viewContext: context,
+                    share: share,
                     persistentContainer: persistentContainer,
-                    shareTitle: shareTitle(for: household),
-                    preparedShare: share,
-                    onSharePrepared: { preparedShare in
-                        share = preparedShare
-                        shareTimeoutTask?.cancel()
-                        shareTimeoutTask = nil
-                    },
                     onDone: {
                         showShareSheet = false
                         isSharing = false
                         reloadShareStatus()
-                        shareTimeoutTask?.cancel()
-                        shareTimeoutTask = nil
+                        shareTask?.cancel()
+                        shareTask = nil
                     },
                     onError: { error in
                         shareErrorText = error.localizedDescription
                         lastCloudKitError = error.localizedDescription
-                        isSharing = false
                         showShareSheet = false
-                        shareTimeoutTask?.cancel()
-                        shareTimeoutTask = nil
+                        isSharing = false
+                        shareTask?.cancel()
+                        shareTask = nil
                     }
                 )
+            } else {
+                // Safety fallback (should only flash briefly)
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Preparing invite…")
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
             }
         }
     }
+
+    // MARK: - Sections
+
+    private var householdSection: some View {
+        Section("Household") {
+            if let household {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(household.name ?? "Household")
+                        .font(.headline)
+
+                    Text("Sharing uses iCloud")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                }
+
+                Button {
+                    inviteMember()
+                } label: {
+                    HStack {
+                        Text(isSharing ? "Preparing invite..." : "Invite Member")
+                        Spacer()
+                        if isSharing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "person.badge.plus")
+                        }
+                    }
+                }
+                .disabled(isSharing)
+            } else {
+                Text("Create a household to begin.")
+                    .foregroundStyle(.secondary)
+
+                TextField("Household name", text: $householdName)
+                TextField("Your name (optional)", text: $myName)
+
+                Button("Create Household") {
+                    createHousehold()
+                }
+                .disabled(householdName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private var shareStatusSection: some View {
+        Section("Share Status") {
+            HStack {
+                Text("iCloud account")
+                Spacer()
+                Text(accountStatusText(accountStatus))
+                    .foregroundStyle(.secondary)
+            }
+
+            if let share {
+                HStack {
+                    Text("Share created")
+                    Spacer()
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                }
+
+                let title = (share[CKShare.SystemFieldKey.title] as? String) ?? ""
+                if !title.isEmpty {
+                    HStack {
+                        Text("Share title")
+                        Spacer()
+                        Text(title)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                HStack {
+                    Text("Share created")
+                    Spacer()
+                    Text("Not yet")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var membersSection: some View {
+        Section("Members") {
+            if let household {
+                let members = fetchMembers(for: household)
+                if members.isEmpty {
+                    ContentUnavailableView("No members yet", systemImage: "person.3")
+                } else {
+                    ForEach(members) { m in
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(m.displayName ?? "Unnamed")
+                                    .font(.body)
+                                if m == member {
+                                    Text("You")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Spacer()
+                        }
+                    }
+                }
+            } else {
+                Text("Create a household to add members.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var howSharingWorksSection: some View {
+        Section("How sharing works") {
+            Text("Inviting someone creates a private iCloud share for this household. Anyone you invite can see the same household data on their device.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var sharingErrorSection: some View {
+        Section("Sharing") {
+            if let shareErrorText {
+                Text(shareErrorText)
+                    .foregroundStyle(.red)
+                    .font(.footnote)
+            } else {
+                Text("No sharing errors.")
+                    .foregroundStyle(.secondary)
+                    .font(.footnote)
+            }
+        }
+    }
+
+    private var errorSection: some View {
+        Section {
+            if let errorText {
+                Text(errorText)
+                    .foregroundStyle(.red)
+                    .font(.footnote)
+            }
+        }
+    }
+
+    #if DEBUG
+    private var debugSection: some View {
+        Section("Debug") {
+            HStack {
+                Text("Account status")
+                Spacer()
+                Text(accountStatusText(accountStatus))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Last CloudKit error")
+                Spacer()
+                Text(lastCloudKitError ?? "None")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Button("Reload share status") {
+                reloadShareStatus()
+            }
+        }
+    }
+    #endif
 
     // MARK: - Share handling
 
     private func inviteMember() {
         guard let household else { return }
+
         shareErrorText = nil
+        lastCloudKitError = nil
+
         isSharing = true
+        showShareSheet = true
+
         shareAttemptID = UUID()
         let attemptID = shareAttemptID
+
         print("ℹ️ Preparing CloudKit share for household:", household.objectID)
 
-        shareTimeoutTask?.cancel()
-        shareTimeoutTask = Task {
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard isSharing, shareAttemptID == attemptID else { return }
-                shareErrorText = "Invite is taking too long. Check iCloud and try again."
-                isSharing = false
-                showShareSheet = false
-            }
-        }
-
+        // Optional preload: if a share already exists, pass it into the share sheet.
+        // If nil, CloudKitShareSheet should create it.
         share = (try? CloudSharing.fetchShare(
             for: household.objectID,
             persistentContainer: persistentContainer
         ))
 
-        isSharing = false
-        showShareSheet = true
+        // Timeout watchdog (only if still "preparing")
+        shareTimeoutTask?.cancel()
+        shareTimeoutTask = Task {
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard isSharing, shareAttemptID == attemptID else { return }
+                shareErrorText = "Invite is taking too long. Check iCloud and try again."
+                lastCloudKitError = shareErrorText
+                isSharing = false
+                showShareSheet = false
+            }
+        }
     }
 
     private func reloadShareStatus() {
@@ -158,8 +339,11 @@ struct SettingsView: View {
         let req: NSFetchRequest<HouseholdMember> = HouseholdMember.fetchRequest()
         req.predicate = NSPredicate(format: "household == %@", household)
         req.sortDescriptors = [
-            NSSortDescriptor(key: "displayName", ascending: true,
-                             selector: #selector(NSString.localizedCaseInsensitiveCompare(_:)))
+            NSSortDescriptor(
+                key: "displayName",
+                ascending: true,
+                selector: #selector(NSString.localizedCaseInsensitiveCompare(_:))
+            )
         ]
 
         do {
@@ -233,4 +417,3 @@ struct SettingsView: View {
         }
     }
 }
-

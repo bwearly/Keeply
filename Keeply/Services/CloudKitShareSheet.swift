@@ -8,12 +8,8 @@ import CoreData
 import CloudKit
 
 struct CloudKitShareSheet: UIViewControllerRepresentable {
-    let householdID: NSManagedObjectID
-    let viewContext: NSManagedObjectContext
+    let share: CKShare
     let persistentContainer: NSPersistentCloudKitContainer
-    let shareTitle: String
-    let preparedShare: CKShare?
-    let onSharePrepared: (CKShare) -> Void
     let onDone: () -> Void
     let onError: (Error) -> Void
 
@@ -22,48 +18,14 @@ struct CloudKitShareSheet: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> UICloudSharingController {
-        let controller = UICloudSharingController { _, completion in
-            Task { @MainActor in
-                do {
-                    let share: CKShare
-                    if let preparedShare, preparedShare.url != nil {
-                        share = preparedShare
-                    } else {
-                        let household = try viewContext.existingObject(with: householdID) as! Household
-                        share = try await CloudSharing.fetchOrCreateShare(
-                            for: household,
-                            in: viewContext,
-                            persistentContainer: persistentContainer
-                        )
-                    }
+        let container = CloudSharing.cloudKitContainer(from: persistentContainer)
 
-                    let currentTitle = share[CKShare.SystemFieldKey.title] as? String
-                    if currentTitle == nil || currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-                        share[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
-                    }
-
-                    guard share.url != nil else {
-                        throw NSError(
-                            domain: "CloudKitShareSheet",
-                            code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "Invite link not ready yet. Try again in a moment."]
-                        )
-                    }
-
-                    print("✅ CloudKit share ready:", share.recordID.recordName)
-                    onSharePrepared(share)
-                    completion(share, CloudSharing.cloudKitContainer(from: persistentContainer), nil)
-                } catch {
-                    print("❌ CloudKit share preparation failed:", error)
-                    onError(error)
-                    completion(nil, nil, error)
-                }
-            }
-        }
+        let controller = UICloudSharingController(share: share, container: container)
         controller.availablePermissions = [.allowReadOnly, .allowReadWrite]
         controller.delegate = context.coordinator
         controller.presentationController?.delegate = context.coordinator
-        print("ℹ️ CloudKit share UI presented.")
+
+        print("ℹ️ CloudKit share UI presented (share provided):", share.recordID.recordName)
         return controller
     }
 
