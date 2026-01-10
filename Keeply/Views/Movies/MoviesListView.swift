@@ -392,6 +392,7 @@ struct MoviesListView: View {
             }
 
             ratingByMovieID = mapped
+            print("ℹ️ Reloaded rating aggregates:", mapped.count)
         }
     }
 

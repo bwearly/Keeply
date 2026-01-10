@@ -4,16 +4,16 @@
         <attribute name="createdAt" optional="YES" attributeType="Date" defaultDateTimeInterval="789336540" usesScalarValueType="NO"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="name" optional="YES" attributeType="String"/>
-        <relationship name="feedbacks" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="MovieFeedback" inverseName="household" inverseEntity="MovieFeedback"/>
-        <relationship name="members" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="HouseholdMember" inverseName="household" inverseEntity="HouseholdMember"/>
-        <relationship name="movies" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="Movie" inverseName="household" inverseEntity="Movie"/>
-        <relationship name="viewings" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="Viewing" inverseName="household" inverseEntity="Viewing"/>
+        <relationship name="feedbacks" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="MovieFeedback" inverseName="household" inverseEntity="MovieFeedback"/>
+        <relationship name="members" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="HouseholdMember" inverseName="household" inverseEntity="HouseholdMember"/>
+        <relationship name="movies" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Movie" inverseName="household" inverseEntity="Movie"/>
+        <relationship name="viewings" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Viewing" inverseName="household" inverseEntity="Viewing"/>
     </entity>
     <entity name="HouseholdMember" representedClassName="HouseholdMember" syncable="YES" codeGenerationType="class">
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="displayName" optional="YES" attributeType="String"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
-        <relationship name="feedbacks" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="MovieFeedback" inverseName="member" inverseEntity="MovieFeedback"/>
+        <relationship name="feedbacks" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="MovieFeedback" inverseName="member" inverseEntity="MovieFeedback"/>
         <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="members" inverseEntity="Household"/>
     </entity>
     <entity name="Movie" representedClassName="Movie" syncable="YES" codeGenerationType="class">
@@ -26,9 +26,9 @@
         <attribute name="posterURL" optional="YES" attributeType="String"/>
         <attribute name="title" optional="YES" attributeType="String"/>
         <attribute name="year" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
-        <relationship name="feedbacks" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="MovieFeedback" inverseName="movie" inverseEntity="MovieFeedback"/>
+        <relationship name="feedbacks" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="MovieFeedback" inverseName="movie" inverseEntity="MovieFeedback"/>
         <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="movies" inverseEntity="Household"/>
-        <relationship name="viewing" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Viewing" inverseName="movie" inverseEntity="Viewing"/>
+        <relationship name="viewing" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Viewing" inverseName="movie" inverseEntity="Viewing"/>
     </entity>
     <entity name="MovieFeedback" representedClassName="MovieFeedback" syncable="YES" codeGenerationType="class">
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
