@@ -12,6 +12,7 @@ enum CloudKitSharePresenter {
 
     static func present(
         householdID: NSManagedObjectID,
+        presenter: UIViewController,
         viewContext: NSManagedObjectContext,
         persistentContainer: NSPersistentCloudKitContainer,
         shareTitle: String,
@@ -21,8 +22,8 @@ enum CloudKitSharePresenter {
         onError: @escaping (Error) -> Void
     ) {
         Task { @MainActor in
-            guard let presenter = TopMostViewController.find() else {
-                onError(PresentationError.noPresenter)
+            guard presenter.view.window != nil else {
+                onError(PresentationError.presenterNotReady)
                 return
             }
 
@@ -129,7 +130,7 @@ enum CloudKitSharePresenter {
     }
 
     private enum PresentationError: LocalizedError {
-        case noPresenter
+        case presenterNotReady
         var errorDescription: String? {
             "Unable to find an active window to present the share sheet."
         }
@@ -191,34 +192,5 @@ enum CloudKitSharePresenter {
         func itemTitle(for csc: UICloudSharingController) -> String? {
             "Keeply Household"
         }
-    }
-}
-
-enum TopMostViewController {
-    static func find() -> UIViewController? {
-        guard let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive }) else {
-            return nil
-        }
-
-        let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
-        guard let root = window?.rootViewController else { return nil }
-        return root.topMostViewController()
-    }
-}
-
-private extension UIViewController {
-    func topMostViewController() -> UIViewController {
-        if let presented = presentedViewController {
-            return presented.topMostViewController()
-        }
-        if let navigation = self as? UINavigationController {
-            return navigation.visibleViewController?.topMostViewController() ?? navigation
-        }
-        if let tab = self as? UITabBarController {
-            return tab.selectedViewController?.topMostViewController() ?? tab
-        }
-        return self
     }
 }

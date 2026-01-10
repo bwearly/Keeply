@@ -27,6 +27,7 @@ struct SettingsView: View {
     @State private var shareAttemptID = UUID()
 
     @State private var shareTask: Task<Void, Never>?
+    @State private var presenterHolder = PresenterHolder()
 
     private let persistentContainer = PersistenceController.shared.container
 
@@ -43,6 +44,7 @@ struct SettingsView: View {
             #endif
         }
         .navigationTitle("Settings")
+        .background(PresenterAnchor(holder: presenterHolder).frame(width: 0, height: 0))
         .onAppear {
             if let hh = household { ensureDefaultMemberExists(in: hh) }
             reloadShareStatus()
@@ -278,9 +280,14 @@ struct SettingsView: View {
     @MainActor
     private func presentShareController(with share: CKShare) {
         guard let household else { return }
+        guard let presenter = presenterHolder.presenter else {
+            handleShareError(PresenterError.presenterUnavailable)
+            return
+        }
 
         CloudKitSharePresenter.present(
             householdID: household.objectID,
+            presenter: presenter,
             viewContext: context,
             persistentContainer: persistentContainer,
             shareTitle: shareTitle(for: household),
@@ -347,6 +354,14 @@ struct SettingsView: View {
         case .restricted: return "Restricted"
         case .couldNotDetermine: return "Could not determine"
         @unknown default: return "Unknown"
+        }
+    }
+
+    private enum PresenterError: LocalizedError {
+        case presenterUnavailable
+
+        var errorDescription: String? {
+            "Unable to present the share sheet. Please try again."
         }
     }
 
