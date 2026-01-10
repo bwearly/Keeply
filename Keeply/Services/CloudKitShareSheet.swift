@@ -23,7 +23,7 @@ struct CloudKitShareSheet: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UICloudSharingController {
         let controller: UICloudSharingController
-        if let preparedShare {
+        if let preparedShare, preparedShare.url != nil {
             let currentTitle = preparedShare[CKShare.SystemFieldKey.title] as? String
             if currentTitle == nil || currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
                 preparedShare[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue

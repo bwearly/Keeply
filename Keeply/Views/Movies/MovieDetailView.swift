@@ -268,9 +268,12 @@ struct MovieDetailView: View {
                             Text(viewingDateText(v.watchedOn))
                                 .font(.headline)
 
-                            Text(v.isRewatch ? "Rewatch" : "Watched")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                            Label(
+                                v.isRewatch ? "Rewatch" : "Watched",
+                                systemImage: v.isRewatch ? "arrow.triangle.2.circlepath" : "checkmark.circle"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
 
                             if let n = v.notes, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Text(n)
@@ -286,9 +289,18 @@ struct MovieDetailView: View {
                         beginEditingViewing(v)
                     }
                     .padding(.vertical, 4)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if isEditing {
+                            Button(role: .destructive) {
+                                deleteViewing(v)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
                 }
                 .onDelete { offsets in
-                    guard isEditing else { return } // only delete while editing
+                    guard isEditing else { return }
                     deleteViewings(offsets: offsets)
                 }
             }
@@ -518,6 +530,18 @@ struct MovieDetailView: View {
         } catch {
             context.rollback()
             print("Failed to delete viewings:", error)
+        }
+    }
+
+    private func deleteViewing(_ viewing: Viewing) {
+        context.delete(viewing)
+        do {
+            try context.save()
+            reloadViewings()
+            print("✅ Deleted viewing:", viewing.objectID)
+        } catch {
+            context.rollback()
+            print("Failed to delete viewing:", error)
         }
     }
 
