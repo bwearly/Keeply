@@ -3,204 +3,107 @@
 //  Keeply
 //
 
-import UIKit
+import SwiftUI
 import CoreData
 import CloudKit
-import ObjectiveC
 
-enum CloudKitSharePresenter {
+struct CloudKitShareSheet: UIViewControllerRepresentable {
+    let householdID: NSManagedObjectID
+    let viewContext: NSManagedObjectContext
+    let persistentContainer: NSPersistentCloudKitContainer
+    let shareTitle: String
+    let preparedShare: CKShare?
+    let onSharePrepared: (CKShare) -> Void
+    let onDone: () -> Void
+    let onError: (Error) -> Void
 
-    static func present(
-        householdID: NSManagedObjectID,
-        window: UIWindow,
-        viewContext: NSManagedObjectContext,
-        persistentContainer: NSPersistentCloudKitContainer,
-        shareTitle: String,
-        preparedShare: CKShare?,
-        onSharePrepared: @escaping (CKShare) -> Void,
-        onDone: @escaping () -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        Task { @MainActor in
-            guard let rootViewController = window.rootViewController else {
-                onError(PresentationError.windowNotReady)
-                return
-            }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onDone: onDone, onError: onError)
+    }
 
-            let container = CloudSharing.cloudKitContainer(from: persistentContainer)
+    func makeUIViewController(context: Context) -> UICloudSharingController {
+        let container = CloudSharing.cloudKitContainer(from: persistentContainer)
+        let controller = UICloudSharingController { _, completion in
+            Task(priority: .userInitiated) {
+                do {
+                    let share: CKShare
 
-            let coordinator = Coordinator(onDone: onDone, onError: onError)
-            let controller = UICloudSharingController { _, completion in
-                // IMPORTANT: do NOT require share.url to exist here.
-                // UICloudSharingController will save/prepare the share and generate the URL as needed.
-                Task(priority: .userInitiated) {
-                    do {
-                        let share: CKShare
-
-                        if let preparedShare {
-                            share = preparedShare
-                            print("ℹ️ Reusing existing CloudKit share:", share.recordID.recordName, "url:", share.url as Any)
-                        } else {
-                            let household: Household = try await viewContext.perform {
-                                guard let obj = try? viewContext.existingObject(with: householdID) as? Household else {
-                                    throw NSError(
-                                        domain: "CloudKitSharePresenter",
-                                        code: 404,
-                                        userInfo: [NSLocalizedDescriptionKey: "Household no longer exists."]
-                                    )
-                                }
-                                return obj
+                    if let preparedShare {
+                        share = preparedShare
+                        print("ℹ️ Reusing existing CloudKit share:", share.recordID.recordName, "url:", share.url as Any)
+                    } else {
+                        let household: Household = try await viewContext.perform {
+                            guard let obj = try? viewContext.existingObject(with: householdID) as? Household else {
+                                throw NSError(
+                                    domain: "CloudKitShareSheet",
+                                    code: 404,
+                                    userInfo: [NSLocalizedDescriptionKey: "Household no longer exists."]
+                                )
                             }
-
-                            print("ℹ️ CloudSharing start for household:", household.objectID)
-
-                            share = try await CloudSharing.fetchOrCreateShare(
-                                for: household,
-                                in: viewContext,
-                                persistentContainer: persistentContainer
-                            )
-
-                            print("ℹ️ Created/fetched CloudKit share:", share.recordID.recordName, "url:", share.url as Any)
+                            return obj
                         }
 
-                        // Ensure title
-                        let currentTitle = share[CKShare.SystemFieldKey.title] as? String
-                        if currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                            share[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
-                        }
+                        print("ℹ️ CloudSharing start for household:", household.objectID)
 
-                        await MainActor.run {
-                            onSharePrepared(share)
-                            completion(share, container, nil)
-                        }
-                    } catch {
-                        print("❌ CloudKit share preparation failed:", error)
-                        await MainActor.run {
-                            onError(error)
-                            completion(nil, container, error)
-                        }
+                        share = try await CloudSharing.fetchOrCreateShare(
+                            for: household,
+                            in: viewContext,
+                            persistentContainer: persistentContainer
+                        )
+
+                        print("ℹ️ Created/fetched CloudKit share:", share.recordID.recordName, "url:", share.url as Any)
+                    }
+
+                    let currentTitle = share[CKShare.SystemFieldKey.title] as? String
+                    if currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                        share[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
+                    }
+
+                    await MainActor.run {
+                        onSharePrepared(share)
+                        completion(share, container, nil)
+                    }
+                } catch {
+                    print("❌ CloudKit share preparation failed:", error)
+                    await MainActor.run {
+                        onError(error)
+                        completion(nil, container, error)
                     }
                 }
             }
-
-            controller.availablePermissions = [.allowReadOnly, .allowReadWrite]
-
-            coordinator.attach(controller)
-            controller.delegate = coordinator
-
-            // Retain coordinator for lifetime of controller
-            objc_setAssociatedObject(
-                controller,
-                &AssociatedKeys.coordinator,
-                coordinator,
-                .OBJC_ASSOCIATION_RETAIN_NONATOMIC
-            )
-
-            DispatchQueue.main.async {
-                present(controller: controller, in: window, attempt: 0)
-            }
-            print("ℹ️ CloudKit share UI presented (preparation handler).")
         }
+
+        controller.availablePermissions = [.allowReadOnly, .allowReadWrite]
+        controller.delegate = context.coordinator
+        print("ℹ️ CloudKit share UI presented (preparation handler).")
+        return controller
     }
 
-    @MainActor
-    private static func present(
-        controller: UICloudSharingController,
-        in window: UIWindow,
-        attempt: Int
-    ) {
-        if attempt >= 10 {
-            DispatchQueue.main.async {
-                guard let rootViewController = window.rootViewController else { return }
-                let presenter = topmostViewController(from: rootViewController)
-                presenter.present(controller, animated: true)
-            }
-            return
-        }
+    func updateUIViewController(_ uiViewController: UICloudSharingController, context: Context) {}
 
-        guard window.rootViewController != nil else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                Task { @MainActor in
-                    present(controller: controller, in: window, attempt: attempt + 1)
-                }
-            }
-            return
-        }
-
-        DispatchQueue.main.async {
-            guard let rootViewController = window.rootViewController else { return }
-            let presenter = topmostViewController(from: rootViewController)
-            presenter.present(controller, animated: true)
-        }
-    }
-
-    private enum AssociatedKeys {
-        static var coordinator = UInt8(0)
-    }
-
-    private enum PresentationError: LocalizedError {
-        case windowNotReady
-        var errorDescription: String? {
-            "Unable to find an active window to present the share sheet."
-        }
-    }
-
-    @MainActor
-    private static func topmostViewController(from root: UIViewController) -> UIViewController {
-        var current = root
-        while true {
-            if let presented = current.presentedViewController {
-                current = presented
-                continue
-            }
-            if let navigation = current as? UINavigationController, let visible = navigation.visibleViewController {
-                current = visible
-                continue
-            }
-            if let tab = current as? UITabBarController, let selected = tab.selectedViewController {
-                current = selected
-                continue
-            }
-            return current
-        }
-    }
-
-    private final class Coordinator: NSObject, UICloudSharingControllerDelegate {
+    final class Coordinator: NSObject, UICloudSharingControllerDelegate {
         private let onDone: () -> Void
         private let onError: (Error) -> Void
         private var didFinish = false
-        private weak var controller: UICloudSharingController?
 
         init(onDone: @escaping () -> Void, onError: @escaping (Error) -> Void) {
             self.onDone = onDone
             self.onError = onError
         }
 
-        func attach(_ controller: UICloudSharingController) {
-            self.controller = controller
-        }
-
-        private func finish(with error: Error? = nil) {
+        private func finish(error: Error? = nil) {
             guard !didFinish else { return }
             didFinish = true
 
             if let error {
                 onError(error)
             }
-
-            guard let controller else {
-                onDone()
-                return
-            }
-
-            controller.dismiss(animated: true) {
-                self.onDone()
-            }
+            onDone()
         }
 
         func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: Error) {
             print("❌ CloudKit share failed to save:", error)
-            finish(with: error)
+            finish(error: error)
         }
 
         func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {
