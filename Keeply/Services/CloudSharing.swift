@@ -15,6 +15,8 @@ import CloudKit
 /// - CKShare records exist alongside the shared root record in the Shared database.
 
 enum CloudSharing {
+    private static let shareTitle = "Keeply Household"
+
     static func containerIdentifier(from persistentContainer: NSPersistentCloudKitContainer) -> String {
         persistentContainer
             .persistentStoreDescriptions
@@ -54,6 +56,9 @@ enum CloudSharing {
         persistentContainer: NSPersistentCloudKitContainer
     ) async throws -> CKShare {
         let objectID = household.objectID
+        print("ℹ️ CloudSharing start for household:", objectID)
+
+        var didSave = false
 
         try await context.perform {
             if objectID.isTemporaryID {
@@ -61,11 +66,18 @@ enum CloudSharing {
             }
             if context.hasChanges {
                 try context.save()
+                didSave = true
             }
+        }
+
+        if didSave {
+            print("✅ CloudSharing saved household changes.")
+            try await Task.sleep(nanoseconds: 400_000_000)
         }
 
         if let existing = try? fetchShare(for: objectID, persistentContainer: persistentContainer) {
             print("ℹ️ Reusing existing CloudKit share:", existing.recordID.recordName)
+            existing[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
             return existing
         }
 
@@ -88,8 +100,7 @@ enum CloudSharing {
                             return
                         }
 
-                        share[CKShare.SystemFieldKey.title] =
-                            (householdInContext.name ?? "Household") as CKRecordValue
+                        share[CKShare.SystemFieldKey.title] = shareTitle as CKRecordValue
                         print("✅ Created new CloudKit share:", share.recordID.recordName)
                         continuation.resume(returning: share)
                     }

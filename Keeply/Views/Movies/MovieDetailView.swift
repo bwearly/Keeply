@@ -53,6 +53,9 @@ struct MovieDetailView: View {
 
     // Watch/rewatch draft notes
     @State private var viewingNotesDraft: String = ""
+    @State private var viewingDateDraft = Date()
+    @State private var viewingToEdit: Viewing?
+    @State private var viewingEditDate = Date()
 
     var body: some View {
         Form {
@@ -95,6 +98,15 @@ struct MovieDetailView: View {
         }
         .task {
             await ensurePosterLoaded()
+        }
+        .sheet(item: $viewingToEdit) { viewing in
+            ViewingDateEditor(
+                viewing: viewing,
+                date: $viewingEditDate,
+                onSave: { updatedDate in
+                    saveViewingDate(viewing, date: updatedDate)
+                }
+            )
         }
     }
 
@@ -268,6 +280,11 @@ struct MovieDetailView: View {
                         }
                         Spacer()
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard isEditing else { return }
+                        beginEditingViewing(v)
+                    }
                     .padding(.vertical, 4)
                 }
                 .onDelete { offsets in
@@ -282,11 +299,18 @@ struct MovieDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
+                    DatePicker(
+                        "Watch date",
+                        selection: $viewingDateDraft,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+
                     TextField("Notes (optional)", text: $viewingNotesDraft)
 
                     HStack {
                         Button {
-                            addViewing(isRewatch: false, notes: viewingNotesDraft)
+                            addViewing(isRewatch: false, notes: viewingNotesDraft, watchedOn: viewingDateDraft)
                             viewingNotesDraft = ""
                         } label: {
                             Label("Watched", systemImage: "checkmark.circle")
@@ -295,7 +319,7 @@ struct MovieDetailView: View {
                         Spacer()
 
                         Button {
-                            addViewing(isRewatch: true, notes: viewingNotesDraft)
+                            addViewing(isRewatch: true, notes: viewingNotesDraft, watchedOn: viewingDateDraft)
                             viewingNotesDraft = ""
                         } label: {
                             Label("Rewatch", systemImage: "arrow.triangle.2.circlepath")
@@ -445,13 +469,13 @@ struct MovieDetailView: View {
 
     // MARK: - Viewing / Rewatch
 
-    private func addViewing(isRewatch: Bool, notes: String?) {
+    private func addViewing(isRewatch: Bool, notes: String?, watchedOn: Date) {
         context.performAndWait {
             let v = Viewing(context: context)
 
             // Set required fields defensively
             if v.value(forKey: "id") == nil { v.setValue(UUID(), forKey: "id") }
-            if v.value(forKey: "watchedOn") == nil { v.setValue(Date(), forKey: "watchedOn") }
+            v.setValue(watchedOn, forKey: "watchedOn")
 
             v.setValue(isRewatch, forKey: "isRewatch")
             v.setValue(movie, forKey: "movie")
@@ -500,6 +524,24 @@ struct MovieDetailView: View {
     private func viewingDateText(_ date: Date?) -> String {
         guard let date else { return "Unknown date" }
         return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func beginEditingViewing(_ viewing: Viewing) {
+        viewingEditDate = viewing.watchedOn ?? Date()
+        viewingToEdit = viewing
+    }
+
+    @MainActor
+    private func saveViewingDate(_ viewing: Viewing, date: Date) {
+        viewing.watchedOn = date
+        do {
+            try context.save()
+            reloadViewings()
+            print("✅ Updated viewing date:", viewing.objectID)
+        } catch {
+            context.rollback()
+            print("Failed to update viewing date:", error)
+        }
     }
 
     // MARK: - Poster
@@ -628,5 +670,39 @@ private struct PosterLarge: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color(.separator), lineWidth: 0.5)
         )
+    }
+}
+
+private struct ViewingDateEditor: View {
+    let viewing: Viewing
+    @Binding var date: Date
+    let onSave: (Date) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            Form {
+                DatePicker(
+                    "Watch date",
+                    selection: $date,
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+            }
+            .navigationTitle(viewing.isRewatch ? "Edit Rewatch Date" : "Edit Watch Date")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(date)
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }
