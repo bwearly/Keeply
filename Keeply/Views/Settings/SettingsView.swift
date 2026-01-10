@@ -277,9 +277,17 @@ struct SettingsView: View {
 
     @MainActor
     private func presentShareController(with share: CKShare) {
+        guard let household else { return }
+
         CloudKitSharePresenter.present(
-            share: share,
+            householdID: household.objectID,
+            viewContext: context,
             persistentContainer: persistentContainer,
+            shareTitle: shareTitle(for: household),
+            preparedShare: share, // can be nil too, but you already fetched/created it
+            onSharePrepared: { prepared in
+                self.share = prepared
+            },
             onDone: {
                 shareTimeoutTask?.cancel()
                 shareTimeoutTask = nil
@@ -293,6 +301,7 @@ struct SettingsView: View {
             }
         )
     }
+
 
     @MainActor
     private func handleShareError(_ error: Error) {
