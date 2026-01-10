@@ -29,6 +29,11 @@ struct MoviesListView: View {
     @State private var sleptOnly: Bool = false
     @State private var sleptMemberID: NSManagedObjectID? = nil
 
+    // Cached aggregates (avoid per-row fetches)
+    @State private var members: [HouseholdMember] = []
+    @State private var ratingByMovieID: [NSManagedObjectID: RatingSummary] = [:]
+    @State private var sleptMovieIDs: Set<NSManagedObjectID> = []
+
     // ✅ Sort
     private enum SortOption: String, CaseIterable, Identifiable {
         case newest = "Newest"
@@ -107,12 +112,8 @@ struct MoviesListView: View {
         }
 
         // Slept only (by member)
-        if sleptOnly, let sleptMemberID,
-           let m = fetchedMembers().first(where: { $0.objectID == sleptMemberID }) {
-            list = list.filter { movie in
-                let fb = fetchFeedback(movie: movie, member: m)
-                return fb?.slept == true
-            }
+        if sleptOnly {
+            list = list.filter { sleptMovieIDs.contains($0.objectID) }
         }
 
         // Sort
@@ -126,7 +127,7 @@ struct MoviesListView: View {
         case .yearNewOld:
             list.sort { $0.year > $1.year }
         case .avgRatingHighLow:
-            list.sort { avgHouseholdRating(for: $0) > avgHouseholdRating(for: $1) }
+            list.sort { avgRatingValue(for: $0) > avgRatingValue(for: $1) }
         }
 
         return list
@@ -171,18 +172,14 @@ struct MoviesListView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
 
-                                // ✅ Avg household rating row (in the card)
+                                // ✅ Avg household rating row (cached)
                                 if let avgText = avgHouseholdRatingText(for: movie) {
                                     Text(avgText)
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }
 
-                                // Optional: show slept indicator for selected member filter
-                                if sleptOnly, let sleptMemberID,
-                                   let m = fetchedMembers().first(where: { $0.objectID == sleptMemberID }),
-                                   let fb = fetchFeedback(movie: movie, member: m),
-                                   fb.slept == true {
+                                if sleptOnly, sleptMovieIDs.contains(movie.objectID) {
                                     Text("😴 Slept through")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -244,7 +241,6 @@ struct MoviesListView: View {
                     Divider()
 
                     // Slept filter (by member)
-                    let members = fetchedMembers()
                     if !members.isEmpty {
                         Picker("Slept member", selection: $sleptMemberID) {
                             Text("None").tag(Optional<NSManagedObjectID>.none)
@@ -280,11 +276,22 @@ struct MoviesListView: View {
             guard !didBackfill else { return }
             didBackfill = true
             await backfillHouseholdIDAndPostersIfNeeded()
+            reloadMembers()
+            await reloadAggregates()
 
             // default slept member to current member if available
             if sleptMemberID == nil, let member {
                 sleptMemberID = member.objectID
             }
+        }
+        .onChange(of: sleptMemberID) { _, _ in
+            Task { await reloadSleptAggregates() }
+        }
+        .onChange(of: sleptOnly) { _, _ in
+            Task { await reloadSleptAggregates() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: context)) { _ in
+            Task { await reloadAggregates() }
         }
     }
 
@@ -337,9 +344,9 @@ struct MoviesListView: View {
         }
     }
 
-    // MARK: - Helpers (ratings + members + feedback)
+    // MARK: - Helpers (members + aggregates)
 
-    private func fetchedMembers() -> [HouseholdMember] {
+    private func reloadMembers() {
         let req = NSFetchRequest<HouseholdMember>(entityName: "HouseholdMember")
         if let hid = household.id {
             req.predicate = NSPredicate(format: "household.id == %@", hid as CVarArg)
@@ -347,62 +354,74 @@ struct MoviesListView: View {
             req.predicate = NSPredicate(format: "household == %@", household)
         }
         req.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: true)]
-        return (try? context.fetch(req)) ?? []
+        members = (try? context.fetch(req)) ?? []
     }
 
-    private func fetchFeedback(movie: Movie, member: HouseholdMember) -> MovieFeedback? {
-        let req = NSFetchRequest<MovieFeedback>(entityName: "MovieFeedback")
-        req.fetchLimit = 1
-        req.predicate = NSPredicate(format: "movie == %@ AND member == %@", movie, member)
-        return try? context.fetch(req).first
+    private func reloadAggregates() async {
+        await reloadRatingAggregates()
+        await reloadSleptAggregates()
+    }
+
+    private func reloadRatingAggregates() async {
+        await context.perform {
+            let req = NSFetchRequest<NSDictionary>(entityName: "MovieFeedback")
+            req.predicate = NSPredicate(format: "household == %@ AND rating > 0", household)
+            req.resultType = .dictionaryResultType
+
+            let avgExpr = NSExpressionDescription()
+            avgExpr.name = "avgRating"
+            avgExpr.expression = NSExpression(forFunction: "average:", arguments: [NSExpression(forKeyPath: "rating")])
+            avgExpr.expressionResultType = .doubleAttributeType
+
+            let countExpr = NSExpressionDescription()
+            countExpr.name = "countRating"
+            countExpr.expression = NSExpression(forFunction: "count:", arguments: [NSExpression(forKeyPath: "rating")])
+            countExpr.expressionResultType = .integer64AttributeType
+
+            req.propertiesToFetch = ["movie", avgExpr, countExpr]
+            req.propertiesToGroupBy = ["movie"]
+
+            let results = (try? context.fetch(req)) ?? []
+            var mapped: [NSManagedObjectID: RatingSummary] = [:]
+
+            for dict in results {
+                guard let movieID = dict["movie"] as? NSManagedObjectID else { continue }
+                let avg = (dict["avgRating"] as? Double) ?? 0
+                let count = Int((dict["countRating"] as? Int64) ?? 0)
+                mapped[movieID] = RatingSummary(avg: avg, count: count)
+            }
+
+            ratingByMovieID = mapped
+        }
+    }
+
+    private func reloadSleptAggregates() async {
+        guard sleptOnly, let sleptMemberID,
+              let selectedMember = members.first(where: { $0.objectID == sleptMemberID }) else {
+            await MainActor.run { sleptMovieIDs = [] }
+            return
+        }
+
+        await context.perform {
+            let req = NSFetchRequest<NSDictionary>(entityName: "MovieFeedback")
+            req.predicate = NSPredicate(format: "household == %@ AND member == %@ AND slept == YES", household, selectedMember)
+            req.resultType = .dictionaryResultType
+            req.propertiesToFetch = ["movie"]
+            req.propertiesToGroupBy = ["movie"]
+
+            let results = (try? context.fetch(req)) ?? []
+            let ids = results.compactMap { $0["movie"] as? NSManagedObjectID }
+            sleptMovieIDs = Set(ids)
+        }
     }
 
     private func avgHouseholdRatingText(for movie: Movie) -> String? {
-        let req = NSFetchRequest<NSDictionary>(entityName: "MovieFeedback")
-        req.predicate = NSPredicate(format: "movie == %@ AND rating > 0", movie)
-        req.resultType = .dictionaryResultType
-
-        let avgExpr = NSExpressionDescription()
-        avgExpr.name = "avgRating"
-        avgExpr.expression = NSExpression(forFunction: "average:", arguments: [NSExpression(forKeyPath: "rating")])
-        avgExpr.expressionResultType = .doubleAttributeType
-
-        let countExpr = NSExpressionDescription()
-        countExpr.name = "countRating"
-        countExpr.expression = NSExpression(forFunction: "count:", arguments: [NSExpression(forKeyPath: "rating")])
-        countExpr.expressionResultType = .integer64AttributeType
-
-        req.propertiesToFetch = [avgExpr, countExpr]
-
-        do {
-            let result = try context.fetch(req).first
-            let avg = (result?.value(forKey: "avgRating") as? Double) ?? 0
-            let count = (result?.value(forKey: "countRating") as? Int64) ?? 0
-            guard count > 0 else { return nil }
-            return "Avg \(String(format: "%.1f", avg))/10 (\(count))"
-        } catch {
-            return nil
-        }
+        guard let summary = ratingByMovieID[movie.objectID], summary.count > 0 else { return nil }
+        return "Avg \(String(format: "%.1f", summary.avg))/10 (\(summary.count))"
     }
 
-    private func avgHouseholdRating(for movie: Movie) -> Double {
-        let req = NSFetchRequest<NSDictionary>(entityName: "MovieFeedback")
-        req.predicate = NSPredicate(format: "movie == %@ AND rating > 0", movie)
-        req.resultType = .dictionaryResultType
-
-        let avgExpr = NSExpressionDescription()
-        avgExpr.name = "avgRating"
-        avgExpr.expression = NSExpression(forFunction: "average:", arguments: [NSExpression(forKeyPath: "rating")])
-        avgExpr.expressionResultType = .doubleAttributeType
-
-        req.propertiesToFetch = [avgExpr]
-
-        do {
-            let result = try context.fetch(req).first
-            return (result?.value(forKey: "avgRating") as? Double) ?? 0
-        } catch {
-            return 0
-        }
+    private func avgRatingValue(for movie: Movie) -> Double {
+        ratingByMovieID[movie.objectID]?.avg ?? 0
     }
 
     // MARK: - Delete
@@ -417,6 +436,13 @@ struct MoviesListView: View {
         do { try context.save() }
         catch { print("Save failed:", error) }
     }
+}
+
+// MARK: - Rating summary
+
+private struct RatingSummary {
+    let avg: Double
+    let count: Int
 }
 
 // MARK: - Poster Thumbnail
