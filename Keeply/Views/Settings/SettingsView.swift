@@ -280,14 +280,14 @@ struct SettingsView: View {
     @MainActor
     private func presentShareController(with share: CKShare) {
         guard let household else { return }
-        guard let presenter = presenterHolder.presenter else {
+        guard let window = presenterHolder.window else {
             handleShareError(PresenterError.presenterUnavailable)
             return
         }
 
         CloudKitSharePresenter.present(
             householdID: household.objectID,
-            presenter: presenter,
+            window: window,
             viewContext: context,
             persistentContainer: persistentContainer,
             shareTitle: shareTitle(for: household),
