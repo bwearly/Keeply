@@ -7,6 +7,7 @@
         <relationship name="feedbacks" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="MovieFeedback" inverseName="household" inverseEntity="MovieFeedback"/>
         <relationship name="members" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="HouseholdMember" inverseName="household" inverseEntity="HouseholdMember"/>
         <relationship name="movies" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Movie" inverseName="household" inverseEntity="Movie"/>
+        <relationship name="tvShows" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="TVShow" inverseName="household" inverseEntity="TVShow"/>
         <relationship name="viewings" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Viewing" inverseName="household" inverseEntity="Viewing"/>
     </entity>
     <entity name="HouseholdMember" representedClassName="HouseholdMember" syncable="YES" codeGenerationType="class">
@@ -29,6 +30,18 @@
         <relationship name="feedbacks" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="MovieFeedback" inverseName="movie" inverseEntity="MovieFeedback"/>
         <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="movies" inverseEntity="Household"/>
         <relationship name="viewing" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Viewing" inverseName="movie" inverseEntity="Viewing"/>
+    </entity>
+    <entity name="TVShow" representedClassName="TVShow" syncable="YES" codeGenerationType="class">
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="householdID" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="notes" optional="YES" attributeType="String"/>
+        <attribute name="rating" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="rewatch" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="seasons" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
+        <attribute name="year" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="household" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Household" inverseName="tvShows" inverseEntity="Household"/>
     </entity>
     <entity name="MovieFeedback" representedClassName="MovieFeedback" syncable="YES" codeGenerationType="class">
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
