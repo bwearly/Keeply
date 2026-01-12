@@ -32,6 +32,14 @@ extension Movie {
     }
 }
 
+extension TVShow {
+    public override nonisolated func awakeFromInsert() {
+        super.awakeFromInsert()
+        setPrimitiveValue(UUID(), forKey: "id")
+        setPrimitiveValue(Date(), forKey: "createdAt")
+    }
+}
+
 extension MovieFeedback {
     public override nonisolated func awakeFromInsert() {
         super.awakeFromInsert()
